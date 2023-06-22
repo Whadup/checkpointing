@@ -26,6 +26,7 @@ This will store the result in `.cache/` and load it if the function is called ag
 
 ## Internals
 
-This library uses the `inspect` module to get the source code of the function. It then hashes the source code to create a unique identifier for the function. This identifier is used to store the result of the function in `.cache/` as a binary  file using the library `dill`. We can avoid evaluating the function when the source hash and all arguments match. When results of a checkpointed function are passed to another checkpointed function, the arguments match if they correspond to the same cached file.
-
+This library uses the `inspect` module to get the source code of the function. It then hashes the source code to create a unique identifier for the function. This identifier is used to store the result of the function in `.cache/` as a binary  file using the library `dill`. We can avoid evaluating the function when the source hash and all arguments match. When results of a checkpointed function are passed to another checkpointed function, the arguments match if they correspond to the same cached file. When the source of a class for a returned object has changed, the function is always recomputed.
 Results of functions are shallowly inspected, so returning tuples, dicts or lists is treated accordingly. 
+
+Warning: When the source of a function or method used in a checkpointed function is changed, we do not detect this change, as source code is not inspected recursively. 
