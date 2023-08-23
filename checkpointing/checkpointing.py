@@ -42,6 +42,7 @@ class CheckpointPlaceholder:
         return self.key
 
 def iterate_and_store_native_types(obj):
+    """Check if obj can be json-serialized. if it can, we stop iterating, else we recurse further"""
     if obj is None:
         pass
     elif isinstance(obj, dict):
@@ -86,24 +87,7 @@ def iterate_and_store_native_types(obj):
     return obj
 
 def recursively_replace_objects_with_keys(obj):
-    if obj is None:
-        pass
-    elif isinstance(obj, dict):
-        try:
-            json.dumps(obj)
-        except:
-            obj = dict({recursively_replace_objects_with_keys(k):recursively_replace_objects_with_keys(v) for k, v in obj.items()})
-    elif isinstance(obj, list):
-        try:
-            json.dumps(obj)
-        except:
-            obj = list([recursively_replace_objects_with_keys(v) for v in obj])
-    elif isinstance(obj, tuple):
-        try:
-            json.dumps(obj)
-        except:
-            obj = tuple([recursively_replace_objects_with_keys(v) for v in obj])
-    else:
+    def handle_object(obj):
         logging.debug("check if argument is in cache")
         logging.debug(_CACHED_OBJECTS_obj2key)
         if safe_hash(obj) in _CACHED_OBJECTS_obj2key:
@@ -111,8 +95,37 @@ def recursively_replace_objects_with_keys(obj):
             obj = _CACHED_OBJECTS_obj2key[safe_hash(obj)]
         else:
             obj = safe_hash(obj)
+        return obj
+    return json.dumps(obj, default=handle_object, sort_keys=True)
 
-    return obj
+# def recursively_replace_objects_with_keys(obj):
+#     if obj is None:
+#         pass
+#     elif isinstance(obj, dict):
+#         try:
+#             json.dumps(obj)
+#         except TypeError as e:
+#             obj = dict({recursively_replace_objects_with_keys(k):recursively_replace_objects_with_keys(v) for k, v in obj.items()})
+#     elif isinstance(obj, list):
+#         try:
+#             json.dumps(obj)
+#         except TypeError as e:
+#             obj = list([recursively_replace_objects_with_keys(v) for v in obj])
+#     elif isinstance(obj, tuple):
+#         try:
+#             json.dumps(obj)
+#         except TypeError as e:
+#             obj = tuple([recursively_replace_objects_with_keys(v) for v in obj])
+#     else:
+#         logging.debug("check if argument is in cache")
+#         logging.debug(_CACHED_OBJECTS_obj2key)
+#         if safe_hash(obj) in _CACHED_OBJECTS_obj2key:
+#             logging.debug(f"Found object in cache {obj} {_CACHED_OBJECTS_obj2key[safe_hash(obj)]}")
+#             obj = _CACHED_OBJECTS_obj2key[safe_hash(obj)]
+#         else:
+#             obj = safe_hash(obj)
+
+#     return obj
 
 def recursively_replace_key_with_objects(obj):
     if obj is None:
@@ -150,29 +163,25 @@ def recursively_replace_key_with_objects(obj):
                             raise Exception("Class source code has changed")
     return obj
 
-def replace_objects_with_keys(args, kwargs):
-    replaced_args = []
-    replaced_kwargs = {}
-    replaced_args = list([recursively_replace_objects_with_keys(arg) for arg in args])
-    replaced_kwargs = dict({k:recursively_replace_objects_with_keys(v) for k, v in kwargs.items()})
-    return replaced_args, replaced_kwargs
+# def replace_objects_with_keys(args, kwargs):
+#     replaced_args = []
+#     replaced_kwargs = {}
+#     replaced_args = list([recursively_replace_objects_with_keys(arg) for arg in args])
+#     replaced_kwargs = dict({k:recursively_replace_objects_with_keys(v) for k, v in kwargs.items()})
+#     return replaced_args, replaced_kwargs
 
 
-def checkpointed_function(func):
+def checkpointed_function(func, disabled=False, force_recompute=False):
     def wrapper(*args, **kwargs):
         # get AST source code of function func
         source = inspect.getsource(func)
         # get hash of source code
         source_hash = hash(source.encode())
         # replace objects in arguments that are in _CACHED_OBJECTS cache with their keys to allow hash matching
-        replaced_args, replaced_kwargs = replace_objects_with_keys(args, kwargs)
-        # then compute the hash
-        logging.debug(replaced_args)
-        logging.debug(replaced_kwargs)
-        argument_hash = hash(json.dumps({"args":replaced_args, "kwargs":replaced_kwargs}, sort_keys=True).encode())
+        argument_hash = hash(recursively_replace_objects_with_keys({"args":args, "kwargs":kwargs}).encode())
         combined_hash = source_hash + argument_hash
         logging.debug("Combined hash:", combined_hash, "Source hash:", source_hash, "Argument hash:", argument_hash)
-        if combined_hash in _CACHE:
+        if combined_hash in _CACHE and (not force_recompute):
             logging.debug("Found the function in the cache")
             # load result from cached
             obj = dill.load(open(f".cache/{combined_hash}.pickle", "rb"))
@@ -201,5 +210,7 @@ def checkpointed_function(func):
         with open(f".cache/{combined_hash}.pickle", "wb") as outfile:
             dill.dump(converted, outfile)
         return results
+    if disabled:
+        return func
     return wrapper
 
